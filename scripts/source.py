@@ -10,6 +10,8 @@ from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 REPOSITORY = re.compile(r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?/[a-zA-Z0-9_.-]{1,100}")
+SCOPE = re.compile(r"[A-Za-z0-9_-]+(?:/[A-Za-z0-9_.-]+)*")
+CONTEXT_FILES = {"LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING", "ASSETS.md"}
 SHA = re.compile(r"[a-f0-9]{40}")
 LFS = b"version https://git-lfs.github.com/spec/v1"
 MIB = 1024 * 1024
@@ -39,12 +41,16 @@ def api(repository, path=""):
         return json.load(response)
 
 
-def acquire(repository, requested_sha, work, target, report):
+def acquire(repository, requested_sha, work, target, report, scope=""):
     if not REPOSITORY.fullmatch(repository) or repository.split("/")[1] in (".", ".."):
         raise SourceError("Expected a GitHub repository in owner/repository format.")
     report["repository"] = repository
     if requested_sha and not SHA.fullmatch(requested_sha):
         raise SourceError("An optional commit must be a full lowercase Git SHA.")
+    if scope and (not SCOPE.fullmatch(scope) or len(scope) > 140
+                  or any(part in (".", "..", ".git") for part in scope.lower().split("/"))):
+        raise SourceError("Expected a safe repository-relative template directory.")
+    report["scope"] = scope or "."
     try:
         meta = api(repository)
     except HTTPError as error:
@@ -83,6 +89,15 @@ def acquire(repository, requested_sha, work, target, report):
     report["commit"] = commit
     tree = run_git("ls-tree", "-r", "-z", "-l", "--full-tree", commit, capture=True)
     entries = tree.split(b"\0")[:-1]
+    if scope:
+        prefix = (scope + "/").encode()
+        if not any(entry.split(b"\t", 1)[1].startswith(prefix) for entry in entries):
+            raise SourceError("The requested template directory is absent from the pinned tree.")
+        entries = [
+            entry for entry in entries
+            if (name := entry.split(b"\t", 1)[1]).startswith((prefix, b".github/workflows/"))
+            or name in {path.encode() for path in CONTEXT_FILES}
+        ]
     if len(entries) > MAX_ENTRIES:
         raise SourceError(f"Tree exceeds the {MAX_ENTRIES:,}-entry scan limit.")
 

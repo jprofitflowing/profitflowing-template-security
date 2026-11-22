@@ -10,12 +10,13 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import extra_checks
 import heuristics
 import source
 
 ROOT = Path(__file__).resolve().parents[1]
 POLICY = json.loads((ROOT / "policy/gate.json").read_text())
-CHECKS = ("Source", "ClamAV", "Trivy", "Static", "Semgrep", "Licence")
+CHECKS = ("Source", "ClamAV", "Trivy", "OSV", "Static", "Semgrep", "CodeQL JS/TS", "CodeQL Actions", "Licence")
 MAX_EXAMPLES = 3
 TRIVY_LOG_LEVEL = re.compile(r"^\S+\s+(WARN|ERROR|FATAL)\s+(.*)$")
 
@@ -25,7 +26,7 @@ class Incomplete(Exception):
 
 
 def safe(value):
-    value = str(value)[:160]
+    value = str(value)[:240]
     value = re.sub(r"[^a-zA-Z0-9_ ./@+():,=\[\]-]", "?", value)
     return html.escape(value).replace("@", "&#64;").replace(".", "&#46;").replace("[", "&#91;")
 
@@ -73,6 +74,7 @@ class Report:
         lines = [
             f"## {verdict}", "",
             f"- Repository: {safe(self.data['repository'])}",
+            f"- Source directory: {safe(self.data.get('scope', '.'))}",
             f"- Source commit: {safe(self.data['commit'])}",
             f"- Gate commit: {safe(os.environ.get('GITHUB_SHA', 'Unknown'))}",
             f"- Findings: {groups['block']} blocking, {groups['review']} requiring review, "
@@ -227,7 +229,7 @@ def scan_trivy(work, target_mount, report, files):
     code, output, errors = docker(
         "Trivy", work, "trivy-fs", [
             *base, "--skip-db-update", "--skip-java-db-update", "--skip-check-update", "--offline-scan",
-            "--scanners", "vuln,secret,misconfig", "--ignorefile=", "--secret-config=", "--include-dev-deps",
+            "--scanners", "vuln,secret,misconfig,license", "--license-full", "--license-risk-threshold", "0", "--ignorefile=", "--secret-config=", "--include-dev-deps",
             "--include-non-failures",
             "--parallel", "2", "--timeout", "6m", "--format", "json", "/source",
         ], mounts=(target_mount, mount),
@@ -253,7 +255,16 @@ def scan_trivy(work, target_mount, report, files):
                     level = "info"
                 category = {"Vulnerabilities": "Dependency", "Misconfigurations": "Config", "Secrets": "Secret"}[group]
                 label = f"{category} {severity} {identifier(finding.get(field))}"
+                if group == "Vulnerabilities":
+                    package = extra_checks.package_label(finding.get("PkgName"), finding.get("InstalledVersion"),
+                                                         finding.get("FixedVersion"))
+                    label += f" {package}"
                 report.add("Trivy", label, target if group != "Secrets" else None, level)
+        for finding in result.get("Licenses") or []:
+            category = identifier(finding.get("Category"))
+            level = "review" if category in ("forbidden", "restricted", "unknown", "Unclassified ID") else "info"
+            report.add("Trivy", f"Licence {identifier(finding.get('Name'))} ({category})",
+                       finding.get("FilePath") or target, level)
     for line in errors.read_text(errors="replace").splitlines():
         logged = TRIVY_LOG_LEVEL.fullmatch(line)
         if not logged:
@@ -270,7 +281,8 @@ def scan_trivy(work, target_mount, report, files):
     inventories = sum(result.get("Class") == "lang-pkgs" for result in results)
     if not inventories and any(Path(name).name in heuristics.LOCKS for name in files):
         raise Incomplete("Lockfiles were present but Trivy returned no language package inventory.")
-    return f"Vulnerabilities, secrets and bundled config checks. DB {updated:%Y-%m-%d %H:%M} UTC. {inventories} dependency inventories."
+    version = POLICY["images"]["Trivy"].split(":", 1)[1].split("@", 1)[0]
+    return f"Trivy {version}: vulnerabilities, secrets, configuration and licences. DB {updated:%Y-%m-%d %H:%M} UTC. {inventories} dependency inventories."
 
 
 def scan_semgrep(work, target_mount, report, expected):
@@ -301,7 +313,7 @@ def scan_semgrep(work, target_mount, report, expected):
         raise Incomplete(f"Semgrep exit {code}. Analysed {len(expected & scanned)} of {len(expected)} expected files. "
                          f"{len(data.get('errors') or [])} analysis errors.")
     unit = "file" if len(expected) == 1 else "files"
-    return f"Local Semgrep CE rules analysed {len(expected)} external source {unit}."
+    return f"Semgrep {POLICY['images']['Semgrep'].split(':', 1)[1].split('@', 1)[0]} local rules analysed {len(expected)} external source {unit}."
 
 
 def main():
@@ -314,7 +326,7 @@ def main():
         def acquire():
             nonlocal files
             files = source.acquire(os.environ["SOURCE_REPOSITORY"], os.environ.get("SOURCE_COMMIT", ""),
-                                   work, target, report.data)
+                                   work, target, report.data, os.environ.get("SOURCE_PATH", ""))
             if any(check == "Source" and level == "review" for check, level, _ in report.counts):
                 raise Incomplete(f"Materialised {len(files)} tracked files. Some content was omitted.")
             return f"Materialised {len(files)} tracked files from Git blobs. No checkout filters or hooks ran."
@@ -339,6 +351,13 @@ def main():
             if inspected:
                 report.run("Semgrep", lambda: scan_semgrep(work, target_mount, report, expected))
             report.run("Licence", licence)
+            tools = extra_checks.StaticTools(work, target, target_mount, files, report, POLICY, command, docker, pull, Incomplete)
+            report.run("OSV", tools.osv)
+            opensource = report.status["Licence"][1].startswith(tuple(
+                f"Repository licence {spdx}. " for spdx in POLICY["licences"]["allowed"]
+            ))
+            for language, name in (("javascript", "CodeQL JS/TS"), ("actions", "CodeQL Actions")):
+                report.run(name, lambda: tools.codeql(language, name, opensource))
     return report.publish()
 
 

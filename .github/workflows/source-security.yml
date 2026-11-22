@@ -12,6 +12,10 @@ on:
         description: "Optional full commit SHA (defaults to the default branch HEAD)"
         required: false
         type: string
+      source_path:
+        description: "Optional template directory within a collection"
+        required: false
+        type: string
 
 permissions: {}
 
@@ -34,6 +38,7 @@ jobs:
         env:
           SOURCE_REPOSITORY: ${{ inputs.repository }}
           SOURCE_COMMIT: ${{ inputs.commit }}
+          SOURCE_PATH: ${{ inputs.source_path }}
           GATE_METADATA_TOKEN: ${{ github.token }}
         run: python3 -E -s -B scripts/scan.py
       - name: Fail closed if the gate did not reach a verdict

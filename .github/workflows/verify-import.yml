@@ -1,0 +1,36 @@
+name: Verify approved template before import
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "Public GitHub repository (owner/repository)"
+        required: true
+        type: string
+      commit:
+        description: "Full approved Git commit SHA"
+        required: true
+        type: string
+      source_path:
+        description: "Template directory used in the scan (blank for repository root)"
+        required: false
+        type: string
+permissions: {}
+jobs:
+  verify:
+    if: github.event.repository.visibility == 'public' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify approved source identity and upstream commit
+        shell: bash
+        env:
+          SOURCE_REPOSITORY: ${{ inputs.repository }}
+          SOURCE_COMMIT: ${{ inputs.commit }}
+          SOURCE_PATH: ${{ inputs.source_path }}
+          GATE_METADATA_TOKEN: ${{ github.token }}
+        run: python3 -E -s -B scripts/verify_import.py "$SOURCE_REPOSITORY" "$SOURCE_COMMIT" "$SOURCE_PATH" | tee "$GITHUB_STEP_SUMMARY"
