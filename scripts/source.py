@@ -28,9 +28,12 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 def api(repository, path=""):
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "ProfitFlowing-source-gate"}
+    if token := os.environ.get("GATE_METADATA_TOKEN"):
+        headers["Authorization"] = f"Bearer {token}"
     request = Request(
         f"https://api.github.com/repos/{repository}{path}",
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "ProfitFlowing-source-gate"},
+        headers=headers,
     )
     with build_opener(NoRedirect()).open(request, timeout=25) as response:
         return json.load(response)

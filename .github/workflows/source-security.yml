@@ -34,6 +34,7 @@ jobs:
         env:
           SOURCE_REPOSITORY: ${{ inputs.repository }}
           SOURCE_COMMIT: ${{ inputs.commit }}
+          GATE_METADATA_TOKEN: ${{ github.token }}
         run: python3 -E -s -B scripts/scan.py
       - name: Fail closed if the gate did not reach a verdict
         if: always() && steps.scan.outputs.report_written != 'true'
