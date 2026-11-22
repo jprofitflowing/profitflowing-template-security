@@ -260,8 +260,9 @@ def scan_trivy(work, target_mount, report, files):
             continue
         severity, message = logged.groups()
         # The policy uses the checks compiled into this pinned image. No OCI policy cache is populated.
-        if (severity == "ERROR" and message.startswith("Falling back to embedded checks")
-                and 'failed to check cache: cache does not exist at' in message):
+        if (severity == "ERROR" and message.startswith("[misconfig] Falling back to embedded checks")
+                and 'failed to check cache: cache does not exist at' in message
+                and "/cache/policy/content" in message):
             continue
         if severity in ("ERROR", "FATAL") or re.search(
                 r"skip|fail|unable|unsupported|could not|too (?:large|big)", message, re.IGNORECASE):
