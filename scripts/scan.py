@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 POLICY = json.loads((ROOT / "policy/gate.json").read_text())
 CHECKS = ("Source", "ClamAV", "Trivy", "Static", "Semgrep", "Licence")
 MAX_EXAMPLES = 3
+TRIVY_LOG_LEVEL = re.compile(r"^\S+\s+(WARN|ERROR|FATAL)\s+(.*)$")
 
 
 class Incomplete(Exception):
@@ -84,13 +85,21 @@ class Report:
         findings = sorted(self.counts.items(), key=lambda item: (order[item[0][1]], -item[1], item[0]))
         if findings:
             lines.extend(["", "### Findings"])
-            for key, count in findings[:100]:
+            # Keep coverage and other dimensions visible when a lockfile has many CVEs.
+            check_rows = Counter()
+            shown = 0
+            for key, count in findings:
                 checker, level, reason = key
+                grouping = (checker, level)
+                if check_rows[grouping] >= 18:
+                    continue
+                check_rows[grouping] += 1
+                shown += 1
                 paths = ", ".join(safe(path) for path in self.examples[key])
                 suffix = f" ({paths})" if paths else ""
                 lines.append(f"- **{level.upper()}** · {checker} · {safe(reason)} × {count}{suffix}")
-            if len(findings) > 100:
-                lines.append(f"- {len(findings) - 100} more finding types omitted from the public summary.")
+            if len(findings) > shown:
+                lines.append(f"- {len(findings) - shown} more finding types omitted from the public summary.")
         if self.domains:
             lines.extend(["", f"### Literal network destinations in code and markup ({len(self.domains)} observed)",
                           ", ".join(safe(host) for host in sorted(self.domains)[:25]),
@@ -192,7 +201,7 @@ def scan_clam(work, target_mount, report):
         if (code not in (0, 1) or not scanned or (code == 1 and not (limit_alerts or malware_alerts))
                 or limit_alerts or re.search(r"(?im)\b(error|failed):", errors.read_text(errors="replace"))):
             raise Incomplete(f"ClamAV reported a scan error, internal limit or incomplete result (exit {code}).")
-        return f"{identity}. FreshClam updated or confirmed current signatures. {scanned} files scanned."
+        return f"{identity}. {scanned} files scanned, {malware_alerts} detections."
     finally:
         command(["docker", "volume", "rm", volume], work, "clam-volume-cleanup", 30)
 
@@ -219,6 +228,7 @@ def scan_trivy(work, target_mount, report, files):
         "Trivy", work, "trivy-fs", [
             *base, "--skip-db-update", "--skip-java-db-update", "--skip-check-update", "--offline-scan",
             "--scanners", "vuln,secret,misconfig", "--ignorefile=", "--secret-config=", "--include-dev-deps",
+            "--include-non-failures",
             "--parallel", "2", "--timeout", "6m", "--format", "json", "/source",
         ], mounts=(target_mount, mount),
     )
@@ -244,13 +254,22 @@ def scan_trivy(work, target_mount, report, files):
                 category = {"Vulnerabilities": "Dependency", "Misconfigurations": "Config", "Secrets": "Secret"}[group]
                 label = f"{category} {severity} {identifier(finding.get(field))}"
                 report.add("Trivy", label, target if group != "Secrets" else None, level)
-    diagnostics = errors.read_text(errors="replace")
-    if re.search(r"(?im)\b(?:WARN|ERROR|FATAL)\b.*(?:skip|fail|unable|unsupported|could not|too (?:large|big))", diagnostics):
-        raise Incomplete("Trivy reported a skipped, unsupported or failed operation. Coverage requires review.")
+    for line in errors.read_text(errors="replace").splitlines():
+        logged = TRIVY_LOG_LEVEL.fullmatch(line)
+        if not logged:
+            continue
+        severity, message = logged.groups()
+        # The policy uses the checks compiled into this pinned image. No OCI policy cache is populated.
+        if (severity == "ERROR" and message.startswith("Falling back to embedded checks")
+                and 'failed to check cache: cache does not exist at' in message):
+            continue
+        if severity in ("ERROR", "FATAL") or re.search(
+                r"skip|fail|unable|unsupported|could not|too (?:large|big)", message, re.IGNORECASE):
+            raise Incomplete("Trivy reported a scan error or coverage warning beyond the expected embedded checks.")
     inventories = sum(result.get("Class") == "lang-pkgs" for result in results)
     if not inventories and any(Path(name).name in heuristics.LOCKS for name in files):
         raise Incomplete("Lockfiles were present but Trivy returned no language package inventory.")
-    return f"Vulnerabilities, secrets and misconfigurations. DB {updated:%Y-%m-%d %H:%M} UTC. {inventories} dependency inventories."
+    return f"Vulnerabilities, secrets and bundled config checks. DB {updated:%Y-%m-%d %H:%M} UTC. {inventories} dependency inventories."
 
 
 def scan_semgrep(work, target_mount, report, expected):
@@ -267,7 +286,9 @@ def scan_semgrep(work, target_mount, report, expected):
     )
     data = json.loads(output.read_text()) if output.stat().st_size else {}
     for match in data.get("results") or []:
-        report.add("Semgrep", identifier(match.get("check_id")), match.get("path"))
+        path, line = match.get("path"), (match.get("start") or {}).get("line")
+        location = f"{path}:{line}" if path and isinstance(line, int) else path
+        report.add("Semgrep", identifier(match.get("check_id")), location)
     scanned = {
         path.removeprefix("/source/").removeprefix("source/")
         for path in (data.get("paths") or {}).get("scanned", [])
@@ -276,9 +297,10 @@ def scan_semgrep(work, target_mount, report, expected):
     for path in sorted(missing):
         report.add("Semgrep", "Expected source file absent from the scan", path)
     if code or data.get("errors") or missing:
-        raise Incomplete(f"Semgrep exit {code}. Matched {len(expected & scanned)} of {len(expected)} expected files. "
+        raise Incomplete(f"Semgrep exit {code}. Analysed {len(expected & scanned)} of {len(expected)} expected files. "
                          f"{len(data.get('errors') or [])} analysis errors.")
-    return f"Local Semgrep CE rules analysed {len(expected)} external source files."
+    unit = "file" if len(expected) == 1 else "files"
+    return f"Local Semgrep CE rules analysed {len(expected)} external source {unit}."
 
 
 def main():
