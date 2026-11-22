@@ -3,7 +3,8 @@
     "ClamAV": "clamav/clamav:1.4@sha256:b7357e2c1c59480628839df301b0d27923561389b36cf341911e1dd9e02cdd05",
     "Trivy": "aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb",
     "Semgrep": "semgrep/semgrep:1.186.0@sha256:6e1b04340e60e910fbb4ddbf3c857ab0918f064417ad5ac530014ccb3cf8c8f1",
-    "Analysis base": "ubuntu:24.04@sha256:9a04f13b3f80ef056361e30868593b1cfd2279fe19e4081cb93a90bf56819d6a"
+    "Analysis base": "node:24-trixie-slim@sha256:60587baa7c895cf438d44f691e4ac8248b36c13b26be77332f874bebb3a64201",
+    "OSV": "ghcr.io/google/osv-scanner:v2.7.1@sha256:a70ffffc2bfd33482953e5d6b64c6fcdb30239717a07b0f0d3ab2859ce3e4cde"
   },
   "licences": {
     "allowed": [
@@ -39,9 +40,7 @@
   ],
   "tools": {
     "OSV": {
-      "version": "2.7.1",
-      "url": "https://github.com/google/osv-scanner/releases/download/v2.7.1/osv-scanner_linux_amd64",
-      "sha256": "fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8"
+      "version": "2.7.1"
     },
     "CodeQL": {
       "version": "2.27.5",

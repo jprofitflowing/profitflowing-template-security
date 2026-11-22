@@ -229,7 +229,7 @@ def scan_trivy(work, target_mount, report, files):
     code, output, errors = docker(
         "Trivy", work, "trivy-fs", [
             *base, "--skip-db-update", "--skip-java-db-update", "--skip-check-update", "--offline-scan",
-            "--scanners", "vuln,secret,misconfig,license", "--license-full", "--license-risk-threshold", "0", "--ignorefile=", "--secret-config=", "--include-dev-deps",
+            "--scanners", "vuln,secret,misconfig,license", "--license-full", "--ignorefile=", "--secret-config=", "--include-dev-deps",
             "--include-non-failures",
             "--parallel", "2", "--timeout", "6m", "--format", "json", "/source",
         ], mounts=(target_mount, mount),
@@ -261,8 +261,8 @@ def scan_trivy(work, target_mount, report, files):
                     label += f" {package}"
                 report.add("Trivy", label, target if group != "Secrets" else None, level)
         for finding in result.get("Licenses") or []:
-            category = identifier(finding.get("Category"))
-            level = "review" if category in ("forbidden", "restricted", "unknown", "Unclassified ID") else "info"
+            category = identifier(finding.get("Category")).lower()
+            level = "review" if category in ("forbidden", "restricted", "reciprocal", "unknown", "unclassified id") else "info"
             report.add("Trivy", f"Licence {identifier(finding.get('Name'))} ({category})",
                        finding.get("FilePath") or target, level)
     for line in errors.read_text(errors="replace").splitlines():

@@ -18,6 +18,11 @@ INLINE = re.compile(r"(?is)<script\b|<iframe\b|<object\b|<embed\b|\bon[a-z]{3,20
 SCRIPT_CODE = re.compile(r"\b(?:eval|Function|atob|unescape|setTimeout|setInterval)\s*\(\s*(?:['\"]|[A-Za-z_$])")
 OBFUSCATION = re.compile(r"(?:\\x[0-9a-fA-F]{2}){8,}|(?:\\u[0-9a-fA-F]{4}){8,}|\b_0x[0-9a-fA-F]{4,}\b")
 RUNTIME_NETWORK = re.compile(r"\b(?:fetch|importScripts|WebSocket|EventSource|sendBeacon|XMLHttpRequest)\s*\(")
+INLINE_SCRIPT_BODY = re.compile(r"(?is)<script\b[^>]*>(.*?)</script\s*>")
+ACTIVE_NETWORK = re.compile(r"(?i)\b(?:import\s*\(|importScripts\s*\(|createElement\s*\(\s*['\"]script['\"]|"
+                            r"serviceWorker\.register\s*\(|window\.open\s*\(|location\.(?:assign|replace)\s*\()")
+REDIRECT_META = re.compile(r"(?is)<meta\b[^>]*http-equiv\s*=\s*['\"]?refresh\b")
+MINER = re.compile(r"(?i)\b(?:coinhive|cryptoloot|coinimp|webminepool|cryptonight)\b")
 EXE_EXTENSIONS = {".exe", ".dll", ".msi", ".app", ".scr", ".bat", ".cmd", ".com", ".wasm", ".so", ".dylib", ".jar"}
 ARCHIVES = {".zip", ".gz", ".xz", ".7z", ".rar", ".tar", ".tgz", ".bz2"}
 LOCKS = {"package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb"}
@@ -86,6 +91,16 @@ def inspect(target, files, report):
             report.add("Static", "Embedded script, active markup or event handler", name)
         if suffix in MARKUP and REMOTE_SCRIPT.search(text):
             report.add("Static", "Remote script loaded by markup", name)
+        inline = "\n".join(INLINE_SCRIPT_BODY.findall(text)) if suffix in MARKUP else ""
+        active_code = text if suffix in SAST else inline
+        if active_code and ACTIVE_NETWORK.search(active_code):
+            report.add("Static", "Dynamic load, navigation, or background worker API", name)
+        if active_code and MINER.search(active_code):
+            report.add("Static", "Possible browser mining indicator", name)
+        if suffix in MARKUP and REDIRECT_META.search(text):
+            report.add("Static", "Automatic HTML redirect", name)
+        if inline and (OBFUSCATION.search(inline) or SCRIPT_CODE.search(inline)):
+            report.add("Static", "Dynamic or potentially obfuscated inline code", name)
         if suffix in SAST and (OBFUSCATION.search(text) or
                 (suffix in {".js", ".mjs", ".cjs"} and SCRIPT_CODE.search(text))):
             report.add("Static", "Dynamic or potentially obfuscated code", name)

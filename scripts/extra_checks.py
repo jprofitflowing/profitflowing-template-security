@@ -46,19 +46,16 @@ class StaticTools:
                     raise self.incomplete(f"{name} did not match the pinned SHA256.")
 
     def osv(self):
-        self.pull("Analysis base", self.work)
+        self.pull("OSV", self.work)
         spec = self.policy["tools"]["OSV"]
-        scanner = self.work / "osv-scanner"
-        self.download("OSV-Scanner", spec["url"], scanner, spec["sha256"])
-        scanner.chmod(0o755)
         database = self.work / "osv/npm/all.zip"
         database.parent.mkdir(parents=True)
         self.download("OSV npm advisory database", "https://osv-vulnerabilities.storage.googleapis.com/npm/all.zip", database)
         config = self.work / "osv-config.toml"
         config.write_text("\n")
-        mounts = (self.source_mount, bind(scanner, "/osv-scanner"), bind(database.parent.parent, "/data"),
+        mounts = (self.source_mount, bind(database.parent.parent, "/data"),
                   bind(config, "/trusted-config.toml"))
-        code, output, errors = self.docker("Analysis base", self.work, "osv", [
+        code, output, errors = self.docker("OSV", self.work, "osv", [
             "scan", "source", "--recursive", "--no-ignore", "--no-resolve", "--offline",
             "--local-db-path=/data", "--config=/trusted-config.toml", "--allow-no-lockfiles",
             "--all-packages", "--format=json", "/source",
@@ -129,12 +126,19 @@ class StaticTools:
             "Analysis base", self.work, f"codeql-{language}-{action}", args,
             mounts=mounts, entry="/engine/codeql", seconds=540,
         )
-        code, _, _ = run("create", [
+        code, _, errors = run("create", [
             "database", "create", "/data/db", f"--language={language}",
             "--build-mode=none", "--source-root=/source", "--threads=2", "--ram=3000",
         ])
         if code:
-            raise self.incomplete(f"CodeQL {language} database creation failed (exit {code}).")
+            diagnostics = errors.read_text(errors="replace")
+            if re.search(r"(?i)no source code|no code seen|no files to process", diagnostics):
+                detail = "Extractor reported no analysable source."
+            elif re.search(r"(?i)not found|no such file|error while loading shared libraries", diagnostics):
+                detail = "Extractor reported a missing file or runtime dependency."
+            else:
+                detail = "No public diagnostic matched."
+            raise self.incomplete(f"CodeQL {language} database creation failed (exit {code}). {detail}")
         code, _, _ = run("analyze", [
             "database", "analyze", "/data/db", f"{language}-code-scanning.qls",
             "--format=sarifv2.1.0", "--output=/data/results.sarif", "--threads=2", "--ram=3000",
