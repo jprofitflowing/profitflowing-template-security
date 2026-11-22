@@ -2,6 +2,12 @@
 
 Run a static security scan before bringing public GitHub source into ProfitFlowing. The gate scans the tracked files at one commit on a disposable standard GitHub-hosted Ubuntu runner. It uses free public-repository compute and retains the Actions summary and redacted job log. It uploads no artifacts or scanner caches. [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
 
+## Ask an AI chat to run a scan
+
+In local Codex, say **“Check this GitHub repo for security threats”** and include the repository link or name. You can give it several targets. Local Codex invokes the installed skill and requests the scans through GitHub Actions.
+
+In another chat, share [the copyable prompt](PROMPT.md). If the chat already knows the repositories, ask it to fill in the prompt from that conversation. A chat with read-only access can guide you through dispatch and interpret the returned Summary.
+
 ## Run a scan
 
 1. Open [Actions → External GitHub Source Security Gate](https://github.com/jprofitflowing/profitflowing-template-security/actions/workflows/source-security.yml).
