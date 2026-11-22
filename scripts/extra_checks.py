@@ -53,7 +53,7 @@ class StaticTools:
         self.download("OSV npm advisory database", "https://osv-vulnerabilities.storage.googleapis.com/npm/all.zip", database)
         config = self.work / "osv-config.toml"
         config.write_text("\n")
-        mounts = (bind(database.parent.parent, "/data"), bind(config, "/trusted-config.toml"))
+        mounts = (bind(database.parent.parent, "/data", False), bind(config, "/trusted-config.toml"))
         common = ["scan", "source", "--offline", "--local-db-path=/data",
                   "--config=/trusted-config.toml", "--all-packages", "--format=json"]
         fixture = self.work / "osv-fixture"
