@@ -1,0 +1,52 @@
+rules:
+  - id: js-dynamic-code
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: Review dynamic JavaScript execution and the origin of the code.
+    pattern-either:
+      - pattern: eval($CODE)
+      - pattern: new Function(...)
+      - pattern: Function(...)
+  - id: js-unsafe-html
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: Review the provenance and sanitisation of dynamically inserted HTML.
+    pattern-either:
+      - pattern: $NODE.innerHTML = $VALUE
+      - pattern: $NODE.outerHTML = $VALUE
+      - pattern: $NODE.insertAdjacentHTML($POS, $VALUE)
+      - pattern: document.write(...)
+  - id: js-shell-command
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: Review Node process execution and argument handling.
+    pattern-either:
+      - pattern: child_process.exec(...)
+      - pattern: child_process.execSync(...)
+      - pattern: require("child_process").exec(...)
+      - pattern: require("node:child_process").exec(...)
+  - id: py-dynamic-code
+    languages: [python]
+    severity: WARNING
+    message: Review dynamic execution and deserialisation.
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+      - pattern: os.system(...)
+      - pattern: subprocess.$METHOD(..., shell=True, ...)
+  - id: go-shell-command
+    languages: [go]
+    severity: WARNING
+    message: Review external process execution and argument handling.
+    pattern: exec.Command(...)
+  - id: php-dynamic-code
+    languages: [php]
+    severity: WARNING
+    message: Review dynamic code, command execution, and deserialisation.
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: shell_exec(...)
+      - pattern: system(...)
+      - pattern: unserialize(...)

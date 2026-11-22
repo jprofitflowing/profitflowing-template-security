@@ -1,0 +1,13 @@
+{
+  "images": {
+    "ClamAV": "clamav/clamav:1.4@sha256:b7357e2c1c59480628839df301b0d27923561389b36cf341911e1dd9e02cdd05",
+    "Trivy": "aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb",
+    "Semgrep": "semgrep/semgrep:1.186.0@sha256:6e1b04340e60e910fbb4ddbf3c857ab0918f064417ad5ac530014ccb3cf8c8f1"
+  },
+  "licences": {
+    "allowed": ["MIT", "MIT-0", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "0BSD", "Unlicense", "CC0-1.0", "Zlib"],
+    "blocked": ["AGPL-3.0", "AGPL-3.0-only", "AGPL-3.0-or-later", "SSPL-1.0", "CC-BY-NC-4.0", "CC-BY-NC-SA-4.0", "CC-BY-NC-ND-4.0", "BUSL-1.1"]
+  },
+  "block_trivy_severities": ["CRITICAL", "HIGH"],
+  "review_trivy_severities": ["UNKNOWN", "MEDIUM"]
+}

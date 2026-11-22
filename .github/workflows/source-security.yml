@@ -1,0 +1,42 @@
+name: External GitHub Source Security Gate
+run-name: Source security scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "Public GitHub repository (owner/repository)"
+        required: true
+        type: string
+      commit:
+        description: "Optional full commit SHA (defaults to the default branch HEAD)"
+        required: false
+        type: string
+
+permissions: {}
+
+jobs:
+  scan:
+    if: github.event.repository.visibility == 'public' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    steps:
+      - name: Check out trusted scanning policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Scan external source as data
+        id: scan
+        env:
+          SOURCE_REPOSITORY: ${{ inputs.repository }}
+          SOURCE_COMMIT: ${{ inputs.commit }}
+        run: python3 -E -s -B scripts/scan.py
+      - name: Fail closed if the gate did not reach a verdict
+        if: always() && steps.scan.outputs.report_written != 'true'
+        run: |
+          printf '%s\n' '## NEEDS REVIEW' '' 'Report generation **INCOMPLETE**. Treat all unreported checks as INCOMPLETE. Do not integrate this source.' >> "$GITHUB_STEP_SUMMARY"
+          exit 1
