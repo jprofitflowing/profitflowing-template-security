@@ -53,13 +53,33 @@ class StaticTools:
         self.download("OSV npm advisory database", "https://osv-vulnerabilities.storage.googleapis.com/npm/all.zip", database)
         config = self.work / "osv-config.toml"
         config.write_text("\n")
-        mounts = (self.source_mount, bind(database.parent.parent, "/data"),
-                  bind(config, "/trusted-config.toml"))
+        mounts = (bind(database.parent.parent, "/data"), bind(config, "/trusted-config.toml"))
+        common = ["scan", "source", "--offline", "--local-db-path=/data",
+                  "--config=/trusted-config.toml", "--all-packages", "--format=json"]
+        fixture = self.work / "osv-fixture"
+        fixture.mkdir()
+        package_lock = {
+            "name": "gate-smoke", "version": "1.0.0", "lockfileVersion": 3, "requires": True,
+            "packages": {
+                "": {"name": "gate-smoke", "version": "1.0.0", "dependencies": {"is-number": "7.0.0"}},
+                "node_modules/is-number": {"version": "7.0.0"},
+            },
+        }
+        (fixture / "package-lock.json").write_text(json.dumps(package_lock))
+        code, output, errors = self.docker("OSV", self.work, "osv-fixture", [
+            *common, "-L", "/fixture/package-lock.json",
+        ], mounts=(*mounts, bind(fixture, "/fixture")), entry="/osv-scanner")
+        if code not in (0, 1) or not output.stat().st_size:
+            # This invocation can see only the trusted fixture and public advisory DB.
+            diagnostic = " ".join(errors.read_text(errors="replace").split())[-158:]
+            raise self.incomplete(f"OSV fixture failed (exit {code}). {diagnostic}")
+        if not any(item.get("package", {}).get("name") == "is-number"
+                   for result in json.loads(output.read_text()).get("results", [])
+                   for item in result.get("packages", [])):
+            raise self.incomplete("OSV did not analyse the fixture's expected package.")
         code, output, errors = self.docker("OSV", self.work, "osv", [
-            "scan", "source", "--recursive", "--no-ignore", "--no-resolve", "--offline",
-            "--local-db-path=/data", "--config=/trusted-config.toml", "--allow-no-lockfiles",
-            "--all-packages", "--format=json", "/source",
-        ], mounts=mounts, entry="/osv-scanner")
+            *common, "--recursive", "--no-ignore", "--allow-no-lockfiles", "/source",
+        ], mounts=(*mounts, self.source_mount), entry="/osv-scanner")
         if code not in (0, 1) or not output.stat().st_size:
             raise self.incomplete(f"OSV-Scanner {spec['version']} did not return results (exit {code}).")
         data = json.loads(output.read_text())
@@ -95,7 +115,7 @@ class StaticTools:
         stamp = datetime.fromtimestamp(database.stat().st_mtime, timezone.utc)
         return (f"OSV-Scanner {spec['version']}. {packages} package entries, {vulnerabilities} advisory matches. "
                 f"Offline npm database fetched; file timestamp {stamp:%Y-%m-%d %H:%M} UTC. "
-                "Unpinned and unrecognised packages are outside advisory coverage.")
+                "Known lockfile fixture passed. Unpinned packages are outside advisory coverage.")
 
     def codeql(self, language, check, opensource):
         if language == "actions":

@@ -159,7 +159,7 @@ def pull(tool, work):
         raise Incomplete(f"{tool} pinned image could not be downloaded (exit {code}).")
 
 
-def scan_clam(work, target_mount, report):
+def scan_clam(work, target_mount, report, expected):
     pull("ClamAV", work)
     volume = f"clam-db-{work.name}"
     db = f"type=volume,src={volume},dst=/var/lib/clamav"
@@ -200,10 +200,10 @@ def scan_clam(work, target_mount, report):
                 else:
                     malware_alerts += 1
                     report.add("ClamAV", "Detection " + identifier(signature), path, "block")
-        if (code not in (0, 1) or not scanned or (code == 1 and not (limit_alerts or malware_alerts))
+        if (code not in (0, 1) or scanned < expected or not scanned or (code == 1 and not (limit_alerts or malware_alerts))
                 or limit_alerts or re.search(r"(?im)\b(error|failed):", errors.read_text(errors="replace"))):
             raise Incomplete(f"ClamAV reported a scan error, internal limit or incomplete result (exit {code}).")
-        return f"{identity}. {scanned} files scanned, {malware_alerts} detections."
+        return f"{identity}. {scanned} files scanned, {malware_alerts} detections. {expected} nonempty tracked files."
     finally:
         command(["docker", "volume", "rm", volume], work, "clam-volume-cleanup", 30)
 
@@ -346,7 +346,8 @@ def main():
         report.run("Source", acquire)
         if files:
             inspected = report.run("Static", inspect)
-            report.run("ClamAV", lambda: scan_clam(work, target_mount, report))
+            nonempty = sum((target / name).stat().st_size > 0 for name in files)
+            report.run("ClamAV", lambda: scan_clam(work, target_mount, report, nonempty))
             report.run("Trivy", lambda: scan_trivy(work, target_mount, report, files))
             if inspected:
                 report.run("Semgrep", lambda: scan_semgrep(work, target_mount, report, expected))
