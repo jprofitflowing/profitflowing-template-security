@@ -48,12 +48,13 @@ class StaticTools:
     def osv(self):
         self.pull("OSV", self.work)
         spec = self.policy["tools"]["OSV"]
-        database = self.work / "osv/npm/all.zip"
+        cache = self.work / "osv"
+        database = cache / "osv-scalibr/npm/all.zip"
         database.parent.mkdir(parents=True)
         self.download("OSV npm advisory database", "https://osv-vulnerabilities.storage.googleapis.com/npm/all.zip", database)
         config = self.work / "osv-config.toml"
         config.write_text("\n")
-        mounts = (bind(database.parent.parent, "/data", False), bind(config, "/trusted-config.toml"))
+        mounts = (bind(cache, "/data", False), bind(config, "/trusted-config.toml"))
         common = ["scan", "source", "--offline", "--local-db-path=/data",
                   "--config=/trusted-config.toml", "--all-packages", "--format=json"]
         fixture = self.work / "osv-fixture"
